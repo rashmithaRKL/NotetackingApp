@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,13 +10,15 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Animated,
+  Keyboard,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Picker } from "@react-native-picker/picker";
 import Icon from "react-native-vector-icons/Feather";
 import axios from "axios";
 
-const API_URL = 'http://localhost:8080'; // Update with your API URL
+const API_URL = 'http://localhost:8080';
 
 const CreateNoteScreen = () => {
   const navigation = useNavigation();
@@ -28,10 +30,50 @@ const CreateNoteScreen = () => {
     date: new Date().toISOString().split('T')[0]
   });
   const [errors, setErrors] = useState({});
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+  const [saveButtonAnim] = useState(new Animated.Value(1));
+  const [characterCount, setCharacterCount] = useState(0);
 
-  const categories = ["Personal", "Work", "Ideas"];
+  const categories = [
+    { id: "Personal", color: "#7b1fa2" },
+    { id: "Work", color: "#1976d2" },
+    { id: "Ideas", color: "#388e3c" },
+    { id: "Important", color: "#c62828" },
+  ];
 
-  // Validate form data
+  // Keyboard listeners for animation
+  useEffect(() => {
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        setKeyboardVisible(true);
+        Animated.timing(saveButtonAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }
+    );
+
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardVisible(false);
+        Animated.timing(saveButtonAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }
+    );
+
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
+  }, []);
+
+  // Validate form
   const validateForm = () => {
     const newErrors = {};
 
@@ -100,6 +142,16 @@ const CreateNoteScreen = () => {
         [field]: null
       }));
     }
+    // Update character count for content
+    if (field === 'content') {
+      setCharacterCount(value.length);
+    }
+  };
+
+  // Get category color
+  const getCategoryColor = (categoryId) => {
+    const category = categories.find(cat => cat.id === categoryId);
+    return category ? category.color : '#333';
   };
 
   return (
@@ -107,85 +159,128 @@ const CreateNoteScreen = () => {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={{ flex: 1 }}
     >
-      <ScrollView style={styles.container}>
-        <Text style={styles.header}>Create New Note</Text>
-
-        {/* Title Input */}
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Title</Text>
-          <TextInput
-            placeholder="Enter note title"
-            value={formData.title}
-            onChangeText={(text) => handleChange("title", text)}
-            style={[
-              styles.input,
-              errors.title && styles.inputError
-            ]}
-          />
-          {errors.title && (
-            <Text style={styles.errorText}>{errors.title}</Text>
-          )}
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              if (formData.title.trim() || formData.content.trim()) {
+                Alert.alert(
+                  "Discard Changes",
+                  "Are you sure you want to discard your changes?",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Discard", style: "destructive", onPress: () => navigation.goBack() }
+                  ]
+                );
+              } else {
+                navigation.goBack();
+              }
+            }}
+          >
+            <Icon name="x" size={24} color="#666" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>New Note</Text>
+          <View style={{ width: 40 }} /> {/* Placeholder for alignment */}
         </View>
 
-        {/* Category Picker */}
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Category</Text>
-          <View style={styles.pickerContainer}>
-            <Picker
-              selectedValue={formData.category}
-              onValueChange={(value) => handleChange("category", value)}
-              style={styles.picker}
-            >
-              {categories.map((category) => (
-                <Picker.Item
-                  label={category}
-                  value={category}
-                  key={category}
-                />
-              ))}
-            </Picker>
+        <ScrollView style={styles.formContainer}>
+          {/* Title Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Title</Text>
+            <TextInput
+              placeholder="Enter note title"
+              value={formData.title}
+              onChangeText={(text) => handleChange("title", text)}
+              style={[
+                styles.input,
+                errors.title && styles.inputError
+              ]}
+              maxLength={100}
+            />
+            {errors.title && (
+              <Text style={styles.errorText}>{errors.title}</Text>
+            )}
+            <Text style={styles.characterCount}>
+              {formData.title.length}/100
+            </Text>
           </View>
-        </View>
 
-        {/* Content Input */}
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Content</Text>
-          <TextInput
-            placeholder="Write your note here"
-            value={formData.content}
-            onChangeText={(text) => handleChange("content", text)}
-            style={[
-              styles.input,
-              styles.textArea,
-              errors.content && styles.inputError
-            ]}
-            multiline
-            textAlignVertical="top"
-          />
-          {errors.content && (
-            <Text style={styles.errorText}>{errors.content}</Text>
-          )}
-        </View>
+          {/* Category Picker */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Category</Text>
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={formData.category}
+                onValueChange={(value) => handleChange("category", value)}
+                style={[styles.picker, { color: getCategoryColor(formData.category) }]}
+              >
+                {categories.map((category) => (
+                  <Picker.Item
+                    label={category.id}
+                    value={category.id}
+                    key={category.id}
+                    color={category.color}
+                  />
+                ))}
+              </Picker>
+            </View>
+          </View>
+
+          {/* Content Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Content</Text>
+            <TextInput
+              placeholder="Write your note here..."
+              value={formData.content}
+              onChangeText={(text) => handleChange("content", text)}
+              style={[
+                styles.input,
+                styles.textArea,
+                errors.content && styles.inputError
+              ]}
+              multiline
+              textAlignVertical="top"
+              maxLength={2000}
+            />
+            {errors.content && (
+              <Text style={styles.errorText}>{errors.content}</Text>
+            )}
+            <Text style={styles.characterCount}>
+              {characterCount}/2000
+            </Text>
+          </View>
+        </ScrollView>
 
         {/* Save Button */}
-        <TouchableOpacity
+        <Animated.View
           style={[
-            styles.saveButton,
-            loading && styles.saveButtonDisabled
+            styles.saveButtonContainer,
+            { transform: [{ translateY: saveButtonAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [100, 0]
+            })}] }
           ]}
-          onPress={handleSaveNote}
-          disabled={loading}
         >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Icon name="save" size={20} color="#fff" />
-              <Text style={styles.saveButtonText}>Save Note</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
+          <TouchableOpacity
+            style={[
+              styles.saveButton,
+              loading && styles.saveButtonDisabled
+            ]}
+            onPress={handleSaveNote}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Icon name="check" size={24} color="#fff" />
+                <Text style={styles.saveButtonText}>Save Note</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
     </KeyboardAvoidingView>
   );
 };
@@ -193,15 +288,30 @@ const CreateNoteScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
     backgroundColor: "#f4f7fb",
   },
   header: {
-    fontSize: 30,
-    fontWeight: "bold",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 15,
+    paddingTop: Platform.OS === "ios" ? 50 : 20,
+    paddingBottom: 15,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e1e8ed",
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "600",
     color: "#333",
-    marginBottom: 20,
-    textAlign: "center",
+  },
+  backButton: {
+    padding: 8,
+  },
+  formContainer: {
+    flex: 1,
+    padding: 20,
   },
   inputContainer: {
     marginBottom: 20,
@@ -216,8 +326,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 15,
     fontSize: 16,
     color: "#333",
     shadowColor: "#000",
@@ -233,16 +343,23 @@ const styles = StyleSheet.create({
     color: "#ff4444",
     fontSize: 14,
     marginTop: 5,
+    marginLeft: 5,
+  },
+  characterCount: {
+    fontSize: 12,
+    color: "#999",
+    textAlign: "right",
+    marginTop: 5,
   },
   textArea: {
-    height: 150,
+    height: 200,
     textAlignVertical: "top",
   },
   pickerContainer: {
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#ddd",
-    borderRadius: 8,
+    borderRadius: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -252,15 +369,19 @@ const styles = StyleSheet.create({
   picker: {
     height: 50,
   },
+  saveButtonContainer: {
+    padding: 20,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#e1e8ed",
+  },
   saveButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#007bff",
     paddingVertical: 15,
-    paddingHorizontal: 25,
-    borderRadius: 8,
-    marginTop: 20,
+    borderRadius: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.1,
@@ -272,7 +393,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "600",
     color: "#fff",
     marginLeft: 10,
   },
